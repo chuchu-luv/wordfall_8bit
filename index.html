@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>한컴타자 사고도구어 게임</title>
+    <style>
+        * { image-rendering: pixelated; }
+        
+        html,body {
+            margin:0; padding:0; height:100%;
+            font-family: 'Courier New', 'Consolas', monospace;
+            background: #000;
+            color: #0f0;
+            overflow: hidden;
+        }
+        
+        .scanline {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(0,255,0,0.03) 0px, transparent 2px, transparent 4px);
+            pointer-events: none; z-index: 9999;
+            animation: flicker 0.15s infinite;
+        }
+        
+        @keyframes flicker {
+            0%, 100% { opacity: 0.95; }
+            50% { opacity: 1; }
+        }
+        
+        .wrap { display:flex; flex-direction:column; height:100%; background: #000; }
+        
+        header, footer { padding:10px 12px; background: #111; border: 3px solid #0f0; }
+        header { display:flex; align-items:center; gap:12px; flex-wrap:wrap; border-bottom: none; }
+        
+        .stat {
+            background: #000; padding: 12px 16px; border: 2px solid #0f0; font-size: 16px; 
+            color: #0f0; text-shadow: 0 0 5px #0f0; font-weight: bold;
+        }
+        
+        .btn {
+            background: #000; border: 3px solid #0f0; color: #0f0; padding: 12px 18px;
+            cursor: pointer; font-size: 14px; font-family: 'Courier New', monospace;
+            text-shadow: 0 0 5px #0f0; transition: all 0.1s; font-weight: bold;
+        }
+        .btn:hover { background: #0f0; color: #000; }
+        
+        .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        
+        #canvas { 
+            width:100%; flex:1; display:block; background: #000;
+            border-left: 3px solid #0f0; border-right: 3px solid #0f0;
+        }
+        
+        .badge {
+            padding: 8px 16px; border: 2px solid #0f0; background: #000;
+            font-size: 14px; color: #0f0; text-shadow: 0 0 5px #0f0; font-weight: bold;
+        }
+        
+        footer { 
+            display:flex; justify-content:space-between; align-items:center; 
+            font-size: 16px; color: #0f0; border-top: 3px solid #0f0; font-weight: bold;
+        }
+        
+        .target { color: #ff0; text-shadow: 0 0 5px #ff0; font-size: 18px; }
+        
+        .game-over {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #000; padding: 30px; border: 4px solid #f00; text-align: center; 
+            z-index: 1000; color: #f00; text-shadow: 0 0 5px #f00;
+        }
+        
+        .game-over .btn { border-color: #f00; color: #f00; text-shadow: 0 0 5px #f00; }
+        .game-over .btn:hover { background: #f00; color: #000; }
+        
+        .paused {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #000; padding: 30px; border: 4px solid #0f0; text-align: center; 
+            z-index: 1000; color: #0f0;
+        }
+        
+        .start-popup { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.95); display: flex; justify-content: center; 
+            align-items: center; z-index: 2000; 
+        }
+        
+        .start-content {
+            background: #000; padding: 40px; border: 4px solid #0f0; text-align: center; 
+            color: #0f0; max-width: 600px;
+        }
+        
+        .start-btn {
+            background: #000; border: 3px solid #0f0; color: #0f0; 
+            padding: 15px 30px; cursor: pointer; font-size: 16px; 
+            font-family: 'Courier New', monospace; margin-top: 20px;
+            text-shadow: 0 0 5px #0f0; font-weight: bold;
+        }
+        .start-btn:hover { background: #0f0; color: #000; }
+        
+        h1, h2 { text-shadow: 0 0 10px #0f0; }
+        h1 { font-size: 20px; font-weight: bold; }
+        h2 { font-size: 18px; margin: 0; font-weight: bold; }
+        
+        @keyframes blink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0.3; }
+        }
+        
+        .blink { animation: blink 1s infinite; }
+    </style>
+</head>
+<body>
+    <div class="scanline"></div>
+    
+    <div class="wrap" style="display:none;" id="gameWrap">
+        <div style="text-align: center; padding: 15px 0; background: #000; border: 3px solid #0f0; border-bottom: none;">
+            <h1 style="margin: 0;">한컴타자 사고도구어 게임 (1~2수준)</h1>
+        </div>
+        
+        <header>
+            <div class="row">
+                <div class="stat">점수 <span id="score">0</span></div>
+                <div class="stat">레벨 <span id="level">1</span></div>
+                <div class="stat">콤보 <span id="combo">0</span></div>
+                <div class="stat">HP <span id="hp">5</span></div>
+            </div>
+            <div class="row">
+                <button class="btn" id="pauseBtn">일시정지</button>
+                <button class="btn" id="restartBtn">재시작</button>
+                <button class="btn" id="muteBtn">음소거</button>
+            </div>
+        </header>
+
+        <canvas id="canvas"></canvas>
+
+        <footer>
+            <div>타겟: <span id="targetWord" class="target">---</span></div>
+            <div class="badge">엔터를 눌러 제출</div>
+        </footer>
+    </div>
+
+    <div style="position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 1000; text-align: center; display:none;" id="inputWrap">
+        <input id="hidInput" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+            placeholder="여기에 입력하세요"
+            style="padding: 18px 30px; font-size: 20px; border: 3px solid #0f0; 
+            background: #000; color: #0f0; text-align: center; min-width: 400px;
+            font-family: 'Courier New', monospace; outline: none; text-shadow: 0 0 5px #0f0; font-weight: bold;" />
+    </div>
+
+    <div id="startPopup" class="start-popup">
+        <div class="start-content">
+            <h2 style="margin-bottom: 20px;">한컴타자 사고도구어 게임 (1~2수준)</h2>
+            <p style="font-size: 14px; line-height: 1.8; margin-bottom: 15px; font-weight: bold;">
+                타자게임으로 사고도구어를 익혀보세요!<br>
+                떨어지는 단어를 입력하세요<br>엔터를 눌러 제출하세요<br>20개 단어마다 레벨 업!
+            </p>
+            <button class="start-btn blink" id="startBtn">시작하기</button>
+        </div>
+    </div>
+
+    <audio id="bgm" loop>
+        <source src="Overboard - The Grey Room _ Golden Palms.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+const WORDS = ["가능","간결성","간접","감각","강력","강조","개혁","거부","검색","견해","결론","경쟁","고려","고정","공개","공동","공통","공평","과장","과정","관련","관리","관찰","구별","구분","권장","균형","극복","근거","긍정","기능","기법","기본","기술","기준","기초","나열","내부","다양성","단계","단정","대비","대조","대책","대칭","대표","도구","도달","독립","독창","동등","동력","동의","등장","모방","목표","무시","미만","밀접","반복","발견","발달","발명","발생","발전","방식","방안","방지","배경","배열","범위","법칙","변경","변천","변화","보관","보안","보완","보장","보호","복사","부정","분류","분리","비율","비판","사고","사례","삭제","상대","상상","상태","상황","생략","생산","설득","성과","성능","성장","성질","세기","소극적","소비","소유","소재","소통","수단","수립","수용","수정","수준","수집","습득","시도","실시","실천","실행","실험","심각성","안정","연구","영향","예상","예시","예외","예정","예측","완벽","완성","완전","외부","요구","요약","요점","요청","용도","우수","운영","원격","원인","유사","유용","유의","유익","유지","유형","의견","의도","의의","의존","의지","이동","이하","인정","자극","자료","자주","작동","적극성","전달","절차","접수","접촉","정보","정상","정지","제도","제안","조건","조사","종료","주의","주장","주제","준수","중립","중복","중시","증거","증명","지속","지시","지식","지원","지적","지점","지정","지지","지표","진출","집중","차단","참가","참여","창의","창조","처리","체험","초과","총합","추리","추측","출처","충돌","충족","측정","타당성","타협","탐구","탐색","토대","통과","통일","통제","특성","특징","파괴","파악","판단","판명","판별","판정","편의","평가","폐기","폐지","포기","포함","표본","표시","표준","표현","필수","학습","해결","해답","해당","해법","해석","해설","핵심","행위","향상","허가","현실","현장","협력","협의","협조","형태","혼동","혼란","확인","활동","활용","효과"];
+
+let buckets = {2:[], 3:[], 4:[]};
+WORDS.forEach(w => {
+    const len = [...w].length;
+    if(len === 2) buckets[2].push(w);
+    else if(len === 3) buckets[3].push(w);
+    else if(len === 4) buckets[4].push(w);
+});
+
+let state = {
+    score:0, level:1, combo:0, maxCombo:0, hp:5, 
+    correct:0, total:0, words:[], lastSpawn:0, target:null,
+    over:false, paused:false, muted:false, started:false,
+    lastWord:'', lastChar:'', charCount:0
+};
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const input = document.getElementById('hidInput');
+const bgm = document.getElementById('bgm'); // ⬅️ 배경음악 요소 추가
+const els = {
+    score: document.getElementById('score'),
+    level: document.getElementById('level'),
+    combo: document.getElementById('combo'),
+    hp: document.getElementById('hp'),
+    target: document.getElementById('targetWord'),
+    pauseBtn: document.getElementById('pauseBtn'),
+    restartBtn: document.getElementById('restartBtn'),
+    muteBtn: document.getElementById('muteBtn'),
+    startBtn: document.getElementById('startBtn'),
+    startPopup: document.getElementById('startPopup'),
+    gameWrap: document.getElementById('gameWrap'),
+    inputWrap: document.getElementById('inputWrap')
+};
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function beep(freq, dur) {
+    if(state.muted) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+}
+
+function getConfig(lv) {
+    const cfgs = {
+        1: {speed:8, interval:2.5, max:2},
+        2: {speed:12, interval:2.0, max:3},
+        3: {speed:16, interval:1.7, max:4},
+        4: {speed:20, interval:1.4, max:5}
+    };
+    return cfgs[lv] || {speed:20+2*(lv-4), interval:0.8, max:5};
+}
+
+function pickWord() {
+    if(state.level === 1 && buckets[2].length) {
+        return buckets[2][Math.floor(Math.random()*buckets[2].length)];
+    }
+    const mix = state.level===1 ? [1,0,0] : state.level===2 ? [0.6,0.4,0] : [0.3,0.5,0.2];
+    const r = Math.random();
+    let size = r < mix[0] ? 2 : (r < mix[0]+mix[1] ? 3 : 4);
+    if(!buckets[size].length) size = 2;
+    const bkt = buckets[size];
+    let w, tries = 0;
+    do {
+        w = bkt[Math.floor(Math.random()*bkt.length)];
+        tries++;
+    } while(tries<10 && (w===state.lastWord || (w[0]===state.lastChar && state.charCount>=2)));
+    if(w[0]===state.lastChar) state.charCount++; 
+    else { state.charCount=1; state.lastChar=w[0]; }
+    state.lastWord = w;
+    return w;
+}
+
+class Word {
+    constructor(txt) {
+        this.text = txt;
+        this.size = 24;
+        this.font = `bold ${this.size}px 'Courier New', monospace`;
+        ctx.font = this.font;
+        this.width = ctx.measureText(txt).width;
+        this.x = Math.random()*(canvas.width - this.width);
+        this.y = -this.size;
+        this.speed = getConfig(state.level).speed;
+        this.age = 0;
+        this.isTarget = false;
+        this.birth = Date.now();
+    }
+    update(dt) {
+        this.age += dt/1000;
+        this.speed = getConfig(state.level).speed * (1 + 0.12*this.age);
+        this.y += (this.speed/100) * window.innerHeight * (dt/1000);
+    }
+    draw() {
+        ctx.font = this.font;
+        let clr = this.isTarget ? '#ff0' : '#0f0';
+        if(this.y > canvas.height*0.85) clr = '#f00';
+        ctx.fillStyle = clr;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = clr;
+        ctx.fillText(this.text, this.x, this.y);
+        ctx.shadowBlur = 0;
+        if(this.isTarget) {
+            ctx.strokeStyle = clr;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.x-5, this.y-this.size-5, this.width+10, this.size+10);
+        }
+    }
+    atBottom() { return this.y > canvas.height*0.9; }
+}
+
+function spawn() {
+    const cfg = getConfig(state.level);
+    const now = Date.now();
+    if(state.words.length < cfg.max && now - state.lastSpawn > cfg.interval*1000) {
+        const txt = pickWord();
+        if(txt) {
+            state.words.push(new Word(txt));
+            state.lastSpawn = now;
+            updateTarget();
+        }
+    }
+}
+
+function updateTarget() {
+    state.words.forEach(w => w.isTarget = false);
+    if(state.words.length) {
+        let bot = state.words[0];
+        state.words.forEach(w => { if(w.y > bot.y) bot = w; });
+        bot.isTarget = true;
+        state.target = bot;
+        els.target.textContent = bot.text;
+    } else {
+        state.target = null;
+        els.target.textContent = '---';
+    }
+}
+
+function complete(word) {
+    const time = (Date.now() - word.birth)/1000;
+    const pts = Math.round((10 + 2*word.text.length) * (1 + state.combo*0.02));
+    state.score += pts;
+    state.combo++;
+    if(state.combo > state.maxCombo) state.maxCombo = state.combo;
+    state.correct++;
+    beep(880, 0.05);
+    const idx = state.words.indexOf(word);
+    if(idx > -1) state.words.splice(idx, 1);
+    updateTarget();
+    const nl = Math.floor(state.correct/20) + 1;
+    if(nl > state.level) state.level = nl;
+    updateUI();
+}
+
+function miss() {
+    state.combo = 0;
+    state.hp--;
+    beep(110, 0.15);
+    if(state.hp <= 0) {
+        gameOver();
+        bgm.pause(); // ⬅️ 게임 오버 시 배경음악 정지 추가
+    }
+    updateUI();
+}
+
+function gameOver() {
+    state.over = true;
+    const d = document.createElement('div');
+    d.className = 'game-over';
+    d.innerHTML = `<h2>게임 오버!</h2><p>점수: ${state.score}</p><p>최대 콤보: ${state.maxCombo}</p><button class="btn" onclick="location.reload()">재시작</button>`;
+    document.body.appendChild(d);
+}
+
+function handleEnter() {
+    const txt = input.value.trim();
+    if(!txt) return;
+    state.total++;
+    if(state.target && txt === state.target.text) {
+        complete(state.target);
+        input.value = '';
+        return;
+    }
+    for(const w of state.words) {
+        if(txt === w.text) {
+            complete(w);
+            input.value = '';
+            return;
+        }
+    }
+    state.combo = 0;
+    beep(110, 0.15);
+    input.value = '';
+    updateUI();
+}
+
+function updateUI() {
+    els.score.textContent = state.score;
+    els.level.textContent = state.level;
+    els.combo.textContent = state.combo;
+    els.hp.textContent = state.hp;
+}
+
+let last = 0;
+function loop(t) {
+    if(!last) { last = t; requestAnimationFrame(loop); return; }
+    const dt = Math.min(t - last, 100);
+    last = t;
+    
+    if(!state.over && !state.paused && state.started) {
+        if(canvas.width !== canvas.offsetWidth || canvas.height !== canvas.offsetHeight) {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const line = canvas.height * 0.9;
+        ctx.strokeStyle = '#f00';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#f00';
+        ctx.beginPath();
+        ctx.moveTo(0, line);
+        ctx.lineTo(canvas.width, line);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        
+        spawn();
+        for(let i = state.words.length-1; i >= 0; i--) {
+            const w = state.words[i];
+            w.update(dt);
+            w.draw();
+            if(w.atBottom()) {
+                state.words.splice(i, 1);
+                miss();
+                updateTarget();
+            }
+        }
+    }
+    requestAnimationFrame(loop);
+}
+
+function startGame() {
+    els.startPopup.style.display = 'none';
+    els.gameWrap.style.display = 'flex';
+    els.inputWrap.style.display = 'block';
+    state.started = true;
+    input.focus();
+    // ⬅️ 게임 시작 시 배경음악 재생 시도 (사용자 상호작용 후)
+    if(!state.muted) {
+        bgm.play().catch(e => {
+            console.log("Background music autoplay blocked, manually playing on interaction.");
+        });
+    }
+}
+
+function pause() {
+    state.paused = !state.paused;
+    els.pauseBtn.textContent = state.paused ? '재개' : '일시정지';
+    if(state.paused) {
+        const d = document.createElement('div');
+        d.className = 'paused';
+        d.id = 'pauseOver';
+        d.innerHTML = '<h2>일시정지</h2>';
+        document.body.appendChild(d);
+        bgm.pause(); // ⬅️ 일시정지 시 배경음악 정지
+    } else {
+        const d = document.getElementById('pauseOver');
+        if(d) d.remove();
+        input.focus();
+        if(!state.muted) {
+            bgm.play().catch(e => {}); // ⬅️ 재개 시 배경음악 재생
+        }
+    }
+}
+
+els.startBtn.onclick = startGame;
+els.pauseBtn.onclick = pause;
+els.restartBtn.onclick = () => location.reload();
+els.muteBtn.onclick = () => {
+    state.muted = !state.muted;
+    els.muteBtn.textContent = state.muted ? '음소거 해제' : '음소거';
+    if(state.muted) {
+        bgm.pause(); // ⬅️ 음소거 시 배경음악 정지
+    } else if(state.started && !state.paused) {
+        bgm.play().catch(e => {}); // ⬅️ 음소거 해제 시 배경음악 재생
+    }
+};
+
+input.addEventListener('keydown', e => {
+    if(e.key === 'Enter') handleEnter();
+});
+
+document.addEventListener('click', () => {
+    if(!state.over && !state.paused && state.started) input.focus();
+});
+
+canvas.width = canvas.offsetWidth;
+canvas.height = canvas.offsetHeight;
+requestAnimationFrame(loop);
+    </script>
+</body>
+</html>
