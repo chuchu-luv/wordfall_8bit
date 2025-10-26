@@ -114,7 +114,7 @@
     
     <div class="wrap" style="display:none;" id="gameWrap">
         <div style="text-align: center; padding: 15px 0; background: #000; border: 3px solid #0f0; border-bottom: none;">
-            <h1 style="margin: 0;">한컴타자 사고도구어 게임 (1~2수준)</h1>
+            <h1 style="margin: 0;">추억의 한컴타자-사고도구어 버전(1~2수준)</h1>
         </div>
         
         <header>
@@ -183,7 +183,7 @@ let state = {
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const input = document.getElementById('hidInput');
-const bgm = document.getElementById('bgm'); // ⬅️ 배경음악 요소 추가
+const bgm = document.getElementById('bgm'); 
 const els = {
     score: document.getElementById('score'),
     level: document.getElementById('level'),
@@ -260,22 +260,44 @@ class Word {
         this.age = 0;
         this.isTarget = false;
         this.birth = Date.now();
+        
+        // 🎯 점멸 효과를 위한 변수
+        this.isFlickering = false;
+        this.flickerTime = 0; 
     }
     update(dt) {
-        this.age += dt/1000;
-        this.speed = getConfig(state.level).speed * (1 + 0.12*this.age);
-        this.y += (this.speed/100) * window.innerHeight * (dt/1000);
+        if (!this.isFlickering) { // 점멸 중에는 움직이지 않음
+            this.age += dt/1000;
+            this.speed = getConfig(state.level).speed * (1 + 0.12*this.age);
+            this.y += (this.speed/100) * window.innerHeight * (dt/1000);
+        } else {
+            this.flickerTime += dt;
+        }
     }
     draw() {
+        // 🎯 점멸 로직
+        if (this.isFlickering) {
+            // 50ms 마다 깜빡임 (200ms 동안 4번 깜빡이고 사라짐)
+            if (Math.floor(this.flickerTime / 50) % 2 === 0) {
+                return; // 깜빡임 순간에는 그리지 않음
+            }
+        }
+        
         ctx.font = this.font;
         let clr = this.isTarget ? '#ff0' : '#0f0';
         if(this.y > canvas.height*0.85) clr = '#f00';
+        
+        // 점멸 중일 때는 색상을 빨간색(타격 효과)으로 고정합니다.
+        if (this.isFlickering) {
+            clr = '#f00';
+        }
+        
         ctx.fillStyle = clr;
         ctx.shadowBlur = 10;
         ctx.shadowColor = clr;
         ctx.fillText(this.text, this.x, this.y);
         ctx.shadowBlur = 0;
-        if(this.isTarget) {
+        if(this.isTarget && !this.isFlickering) { 
             ctx.strokeStyle = clr;
             ctx.lineWidth = 2;
             ctx.strokeRect(this.x-5, this.y-this.size-5, this.width+10, this.size+10);
@@ -287,7 +309,10 @@ class Word {
 function spawn() {
     const cfg = getConfig(state.level);
     const now = Date.now();
-    if(state.words.length < cfg.max && now - state.lastSpawn > cfg.interval*1000) {
+    // 점멸 중인 단어는 최대 단어 수 계산에서 제외
+    const activeWords = state.words.filter(w => !w.isFlickering);
+    
+    if(activeWords.length < cfg.max && now - state.lastSpawn > cfg.interval*1000) {
         const txt = pickWord();
         if(txt) {
             state.words.push(new Word(txt));
@@ -299,9 +324,12 @@ function spawn() {
 
 function updateTarget() {
     state.words.forEach(w => w.isTarget = false);
-    if(state.words.length) {
-        let bot = state.words[0];
-        state.words.forEach(w => { if(w.y > bot.y) bot = w; });
+    // 점멸 중인 단어는 타겟에서 제외
+    const activeWords = state.words.filter(w => !w.isFlickering);
+    
+    if(activeWords.length) {
+        let bot = activeWords[0];
+        activeWords.forEach(w => { if(w.y > bot.y) bot = w; });
         bot.isTarget = true;
         state.target = bot;
         els.target.textContent = bot.text;
@@ -319,9 +347,14 @@ function complete(word) {
     if(state.combo > state.maxCombo) state.maxCombo = state.combo;
     state.correct++;
     beep(880, 0.05);
-    const idx = state.words.indexOf(word);
-    if(idx > -1) state.words.splice(idx, 1);
-    updateTarget();
+    
+    // 🎯 단어를 바로 제거하지 않고 점멸 상태로 전환
+    word.isFlickering = true;
+    word.isTarget = false;
+    
+    // 다음 단어를 타겟으로 지정 (점멸 중인 단어는 제외)
+    updateTarget(); 
+
     const nl = Math.floor(state.correct/20) + 1;
     if(nl > state.level) state.level = nl;
     updateUI();
@@ -333,7 +366,7 @@ function miss() {
     beep(110, 0.15);
     if(state.hp <= 0) {
         gameOver();
-        bgm.pause(); // ⬅️ 게임 오버 시 배경음악 정지 추가
+        bgm.pause();
     }
     updateUI();
 }
@@ -350,12 +383,16 @@ function handleEnter() {
     const txt = input.value.trim();
     if(!txt) return;
     state.total++;
-    if(state.target && txt === state.target.text) {
+    
+    // 점멸 중인 단어는 타겟에서 제외
+    const activeWords = state.words.filter(w => !w.isFlickering);
+    
+    if(state.target && txt === state.target.text && !state.target.isFlickering) {
         complete(state.target);
         input.value = '';
         return;
     }
-    for(const w of state.words) {
+    for(const w of activeWords) {
         if(txt === w.text) {
             complete(w);
             input.value = '';
@@ -402,8 +439,17 @@ function loop(t) {
         spawn();
         for(let i = state.words.length-1; i >= 0; i--) {
             const w = state.words[i];
+            
+            // 🎯 점멸 시간이 200ms를 초과하면 단어를 배열에서 제거
+            if (w.isFlickering && w.flickerTime > 200) {
+                 state.words.splice(i, 1);
+                 updateTarget();
+                 continue; // 이 단어는 업데이트/그리기 건너뜀
+            }
+            
             w.update(dt);
             w.draw();
+            
             if(w.atBottom()) {
                 state.words.splice(i, 1);
                 miss();
@@ -420,7 +466,7 @@ function startGame() {
     els.inputWrap.style.display = 'block';
     state.started = true;
     input.focus();
-    // ⬅️ 게임 시작 시 배경음악 재생 시도 (사용자 상호작용 후)
+    // 🎵 배경음악 재생 로직
     if(!state.muted) {
         bgm.play().catch(e => {
             console.log("Background music autoplay blocked, manually playing on interaction.");
@@ -437,13 +483,13 @@ function pause() {
         d.id = 'pauseOver';
         d.innerHTML = '<h2>일시정지</h2>';
         document.body.appendChild(d);
-        bgm.pause(); // ⬅️ 일시정지 시 배경음악 정지
+        bgm.pause();
     } else {
         const d = document.getElementById('pauseOver');
         if(d) d.remove();
         input.focus();
         if(!state.muted) {
-            bgm.play().catch(e => {}); // ⬅️ 재개 시 배경음악 재생
+            bgm.play().catch(e => {});
         }
     }
 }
@@ -455,9 +501,9 @@ els.muteBtn.onclick = () => {
     state.muted = !state.muted;
     els.muteBtn.textContent = state.muted ? '음소거 해제' : '음소거';
     if(state.muted) {
-        bgm.pause(); // ⬅️ 음소거 시 배경음악 정지
+        bgm.pause();
     } else if(state.started && !state.paused) {
-        bgm.play().catch(e => {}); // ⬅️ 음소거 해제 시 배경음악 재생
+        bgm.play().catch(e => {});
     }
 };
 
